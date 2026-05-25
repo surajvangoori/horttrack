@@ -24,6 +24,7 @@ export default function AdminPanel({ user, profile }) {
   const [empSites, setEmpSites] = useState({});       // { empId: [client, ...] }
   const [siteLoading, setSiteLoading] = useState(false);
   const [addSiteId, setAddSiteId] = useState('');
+  const [siteError, setSiteError] = useState('');
   const [attendanceLogs, setAttendanceLogs] = useState([]);
   const [selectedSessionLogs, setSelectedSessionLogs] = useState([]);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
@@ -79,12 +80,14 @@ export default function AdminPanel({ user, profile }) {
     if (expandedEmpId === emp.id) {
       setExpandedEmpId(null);
       setEditEmpError('');
+      setSiteError('');
       return;
     }
     setExpandedEmpId(emp.id);
     setEditEmpName(emp.full_name);
     setEditEmpRole(emp.role);
     setEditEmpError('');
+    setSiteError('');
     setAddSiteId('');
     if (!empSites[emp.id]) {
       setSiteLoading(true);
@@ -127,13 +130,14 @@ export default function AdminPanel({ user, profile }) {
   const handleAssignSite = async (empId) => {
     if (!addSiteId) return;
     setSiteLoading(true);
+    setSiteError('');
     try {
       await dbService.assignSite(empId, addSiteId);
       const newClient = clients.find(c => c.id === addSiteId);
       setEmpSites(prev => ({ ...prev, [empId]: [...(prev[empId] || []), newClient] }));
       setAddSiteId('');
     } catch (err) {
-      setEditEmpError(err.message || 'Failed to assign site.');
+      setSiteError(err.message || 'Failed to assign site. Check that the RLS policy has been updated in Supabase.');
     } finally {
       setSiteLoading(false);
     }
@@ -141,11 +145,12 @@ export default function AdminPanel({ user, profile }) {
 
   const handleRemoveSite = async (empId, clientId) => {
     setSiteLoading(true);
+    setSiteError('');
     try {
       await dbService.removeSiteAssignment(empId, clientId);
       setEmpSites(prev => ({ ...prev, [empId]: prev[empId].filter(s => s.id !== clientId) }));
     } catch (err) {
-      setEditEmpError(err.message || 'Failed to remove site.');
+      setSiteError(err.message || 'Failed to remove site.');
     } finally {
       setSiteLoading(false);
     }
@@ -673,6 +678,9 @@ export default function AdminPanel({ user, profile }) {
                       {/* Site assignments */}
                       <div>
                         <p style={{ fontSize: '0.72rem', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Assigned Sites</p>
+                        {siteError && (
+                          <div className="alert alert-danger" style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', marginBottom: '0.5rem' }}>{siteError}</div>
+                        )}
                         {siteLoading ? (
                           <div className="spinner" style={{ width: '16px', height: '16px' }} />
                         ) : (
