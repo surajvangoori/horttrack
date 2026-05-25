@@ -730,7 +730,7 @@ export default function AdminPanel({ user, profile }) {
                   <th>Date</th>
                   <th>Check In / Out</th>
                   <th>Duration</th>
-                  <th>Photo</th>
+                  <th>Photos</th>
                   <th>Action</th>
                 </tr>
               </thead>
@@ -761,17 +761,22 @@ export default function AdminPanel({ user, profile }) {
                       </td>
                       <td>{calculateDuration(log.check_in_time, log.check_out_time)}</td>
                       <td>
-                        {log.check_in_photo_url ? (
-                          <a href={log.check_in_photo_url} target="_blank" rel="noopener noreferrer">
-                            <img
-                              src={log.check_in_photo_url}
-                              alt="Check-in selfie"
-                              style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(16,185,129,0.4)', display: 'block' }}
-                            />
-                          </a>
-                        ) : (
-                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>—</span>
-                        )}
+                        <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                          {log.check_in_photo_url ? (
+                            <a href={log.check_in_photo_url} target="_blank" rel="noopener noreferrer" title="Check-in selfie">
+                              <img src={log.check_in_photo_url} alt="Check-in" style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(16,185,129,0.5)', display: 'block' }} />
+                            </a>
+                          ) : (
+                            <span style={{ width: '32px', height: '32px', borderRadius: '50%', border: '1px dashed rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', color: 'var(--text-muted)' }}>in</span>
+                          )}
+                          {log.check_out_photo_url ? (
+                            <a href={log.check_out_photo_url} target="_blank" rel="noopener noreferrer" title="Check-out selfie">
+                              <img src={log.check_out_photo_url} alt="Check-out" style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(99,102,241,0.5)', display: 'block' }} />
+                            </a>
+                          ) : (
+                            <span style={{ width: '32px', height: '32px', borderRadius: '50%', border: '1px dashed rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', color: 'var(--text-muted)' }}>out</span>
+                          )}
+                        </div>
                       </td>
                       <td>
                         <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', width: 'auto' }} onClick={() => handleViewSessionPings(log)}>

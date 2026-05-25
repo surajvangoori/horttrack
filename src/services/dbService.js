@@ -553,6 +553,24 @@ export const dbService = {
     if (error) throw error;
   },
 
+  async uploadCheckOutPhoto(blob, employeeId, sessionId) {
+    const path = `${employeeId}/${sessionId}_out.jpg`;
+    const { error } = await supabase.storage
+      .from('checkin-photos')
+      .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+    if (error) throw error;
+    const { data } = supabase.storage.from('checkin-photos').getPublicUrl(path);
+    return data.publicUrl;
+  },
+
+  async saveCheckOutPhotoUrl(sessionId, photoUrl) {
+    const { error } = await supabase
+      .from('attendance_sessions')
+      .update({ check_out_photo_url: photoUrl })
+      .eq('id', sessionId);
+    if (error) throw error;
+  },
+
   // 7. ADMIN REPORTING
   async getActiveCheckIns() {
     const { data, error } = await supabase
@@ -597,7 +615,8 @@ export const dbService = {
           check_out_time: d.check_out_time,
           check_out_latitude: d.check_out_latitude || 0,
           check_out_longitude: d.check_out_longitude || 0,
-          check_in_photo_url: d.check_in_photo_url || null
+          check_in_photo_url: d.check_in_photo_url || null,
+          check_out_photo_url: d.check_out_photo_url || null
         }));
         localStorage.setItem('hort_sessions', JSON.stringify(mapped));
         return mapped;

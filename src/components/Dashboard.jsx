@@ -23,14 +23,12 @@ export default function Dashboard({ user, profile, onLogout }) {
   const [selectedClientId, setSelectedClientId] = useState('');
   const [activeSession, setActiveSession] = useState(null);
 
-  // GPS Coordinates state
   const [latitude, setLatitude] = useState(null);
   const [longitude, setLongitude] = useState(null);
   const [gpsAccuracy, setGpsAccuracy] = useState(null);
   const [gpsError, setGpsError] = useState('');
   const [trackingGps, setTrackingGps] = useState(false);
 
-  // Geofencing
   const [distanceToClient, setDistanceToClient] = useState(null);
   const maxGeofenceDistance = 100;
   const isWithinRange = distanceToClient !== null && distanceToClient <= maxGeofenceDistance;
@@ -42,8 +40,9 @@ export default function Dashboard({ user, profile, onLogout }) {
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
-  // Photo capture state
+  // Photo capture state — shared between check-in and check-out
   const [photoStep, setPhotoStep] = useState(false);
+  const [photoMode, setPhotoMode] = useState('checkin'); // 'checkin' | 'checkout'
   const [capturedPhoto, setCapturedPhoto] = useState(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState('');
   const [photoCompressing, setPhotoCompressing] = useState(false);
@@ -63,7 +62,6 @@ export default function Dashboard({ user, profile, onLogout }) {
     };
   }, []);
 
-  // Revoke object URL when photo preview changes to avoid memory leaks
   useEffect(() => {
     return () => {
       if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
@@ -74,8 +72,7 @@ export default function Dashboard({ user, profile, onLogout }) {
     if (selectedClientId && latitude !== null && longitude !== null) {
       const client = clients.find(c => c.id === selectedClientId);
       if (client) {
-        const dist = calculateDistance(latitude, longitude, client.latitude, client.longitude);
-        setDistanceToClient(dist);
+        setDistanceToClient(calculateDistance(latitude, longitude, client.latitude, client.longitude));
       }
     } else {
       setDistanceToClient(null);
@@ -144,9 +141,7 @@ export default function Dashboard({ user, profile, onLogout }) {
         setGpsError('');
         dbService.getAssignedClients(profile.id).then(setClients);
       },
-      (err) => {
-        setGpsError(`GPS Error: ${err.message}. Make sure Location is enabled.`);
-      },
+      (err) => setGpsError(`GPS Error: ${err.message}. Make sure Location is enabled.`),
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
@@ -159,7 +154,7 @@ export default function Dashboard({ user, profile, onLogout }) {
     setTrackingGps(false);
   };
 
-  // Step 1: validate GPS + geofence, then open photo capture (online) or check in directly (offline)
+  // ── CHECK-IN ──────────────────────────────────────────────
   const handleCheckIn = () => {
     if (latitude === null || longitude === null) {
       setErrorMessage('Cannot check in. GPS location not acquired yet.');
@@ -169,37 +164,32 @@ export default function Dashboard({ user, profile, onLogout }) {
     setStatusMessage('');
 
     if (!navigator.onLine) {
-      // Offline — skip photo, queue check-in directly
       handleConfirmCheckIn(null);
       return;
     }
-
+    setPhotoMode('checkin');
     setPhotoStep(true);
   };
 
-  // Step 2: called after photo is taken (or null if offline)
   const handleConfirmCheckIn = async (photoBlob) => {
     setLoading(true);
     setErrorMessage('');
     setStatusMessage('');
-
     try {
       const session = await dbService.checkIn(selectedClientId, latitude, longitude, maxGeofenceDistance);
       setActiveSession(session);
 
-      // Upload photo if we have one and the session is real (not a temp offline ID)
       if (photoBlob && navigator.onLine && !session.id.startsWith('sess-temp-')) {
         try {
           const photoUrl = await dbService.uploadCheckInPhoto(photoBlob, profile.id, session.id);
           await dbService.savePhotoUrl(session.id, photoUrl);
         } catch (photoErr) {
-          console.warn('Photo upload failed (check-in still recorded):', photoErr);
+          console.warn('Check-in photo upload failed:', photoErr);
         }
       }
 
       setStatusMessage('Successfully Checked In!');
       clearPhotoState();
-
       await dbService.logLocation(session.id, latitude, longitude, batteryLevel);
       fetchLocationLogs(session.id);
     } catch (err) {
@@ -209,6 +199,52 @@ export default function Dashboard({ user, profile, onLogout }) {
     }
   };
 
+  // ── CHECK-OUT ─────────────────────────────────────────────
+  const handleCheckOut = () => {
+    if (!activeSession) return;
+    setErrorMessage('');
+    setStatusMessage('');
+
+    if (!navigator.onLine) {
+      handleConfirmCheckOut(null);
+      return;
+    }
+    setPhotoMode('checkout');
+    setPhotoStep(true);
+  };
+
+  const handleConfirmCheckOut = async (photoBlob) => {
+    setLoading(true);
+    setErrorMessage('');
+    setStatusMessage('');
+    try {
+      const lat = latitude || activeSession.check_in_latitude;
+      const lng = longitude || activeSession.check_in_longitude;
+
+      await dbService.checkOut(activeSession.id, lat, lng);
+
+      if (photoBlob && navigator.onLine && !activeSession.id.startsWith('sess-temp-')) {
+        try {
+          const photoUrl = await dbService.uploadCheckOutPhoto(photoBlob, profile.id, activeSession.id);
+          await dbService.saveCheckOutPhotoUrl(activeSession.id, photoUrl);
+        } catch (photoErr) {
+          console.warn('Check-out photo upload failed:', photoErr);
+        }
+      }
+
+      await dbService.logLocation(activeSession.id, lat, lng, batteryLevel);
+      setActiveSession(null);
+      setDistanceToClient(null);
+      setStatusMessage('Successfully Checked Out! Shift ended.');
+      clearPhotoState();
+    } catch (err) {
+      setErrorMessage(err.message || 'Check-out failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── PHOTO HELPERS ─────────────────────────────────────────
   const handlePhotoCapture = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -222,7 +258,6 @@ export default function Dashboard({ user, profile, onLogout }) {
     } finally {
       setPhotoCompressing(false);
     }
-    // Reset so the same file can be re-selected on retake
     e.target.value = '';
   };
 
@@ -230,46 +265,23 @@ export default function Dashboard({ user, profile, onLogout }) {
     if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
     setCapturedPhoto(null);
     setPhotoPreviewUrl('');
-    // Re-open the camera
     setTimeout(() => cameraInputRef.current?.click(), 50);
-  };
-
-  const handleCancelPhotoStep = () => {
-    clearPhotoState();
   };
 
   const clearPhotoState = () => {
     setPhotoStep(false);
+    setPhotoMode('checkin');
     setCapturedPhoto(null);
     if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
     setPhotoPreviewUrl('');
   };
 
-  const handleCheckOut = async () => {
-    if (!activeSession) return;
-    if (latitude === null || longitude === null) {
-      setErrorMessage('GPS location not acquired. Check-out will log last known GPS.');
-    }
-
-    setLoading(true);
-    setErrorMessage('');
-    setStatusMessage('');
-
-    try {
-      const lat = latitude || activeSession.check_in_latitude;
-      const lng = longitude || activeSession.check_in_longitude;
-      await dbService.checkOut(activeSession.id, lat, lng);
-      await dbService.logLocation(activeSession.id, lat, lng, batteryLevel);
-      setActiveSession(null);
-      setDistanceToClient(null);
-      setStatusMessage('Successfully Checked Out! Shift ended.');
-    } catch (err) {
-      setErrorMessage(err.message || 'Check-out failed.');
-    } finally {
-      setLoading(false);
-    }
+  const handleConfirmPhoto = () => {
+    if (photoMode === 'checkin') handleConfirmCheckIn(capturedPhoto);
+    else handleConfirmCheckOut(capturedPhoto);
   };
 
+  // ── PING SCHEDULER ────────────────────────────────────────
   const startPingScheduler = () => {
     stopPingScheduler();
     pingIntervalRef.current = setInterval(async () => {
@@ -295,6 +307,11 @@ export default function Dashboard({ user, profile, onLogout }) {
       pingIntervalRef.current = null;
     }
   };
+
+  // ── PHOTO STEP COPY ───────────────────────────────────────
+  const photoStepCopy = photoMode === 'checkin'
+    ? { title: 'Check-In Selfie', subtitle: 'Take a photo to verify your identity at this location.' }
+    : { title: 'Check-Out Selfie', subtitle: 'Take a photo to confirm your departure from this location.' };
 
   return (
     <div className="card" style={{ padding: '1.5rem' }}>
@@ -382,8 +399,8 @@ export default function Dashboard({ user, profile, onLogout }) {
         </div>
       )}
 
-      {/* ── PHOTO CAPTURE STEP ── */}
-      {photoStep && !activeSession && (
+      {/* ── PHOTO CAPTURE STEP (shared for check-in and check-out) ── */}
+      {photoStep && (
         <div style={{
           margin: '1rem 0',
           padding: '1.5rem',
@@ -392,25 +409,24 @@ export default function Dashboard({ user, profile, onLogout }) {
           background: 'rgba(255,255,255,0.02)',
           textAlign: 'center'
         }}>
-          {/* Header */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
             <div style={{ textAlign: 'left' }}>
               <p style={{ fontWeight: '700', color: '#fff', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <Camera size={16} style={{ color: 'var(--primary)' }} /> Selfie Required
+                <Camera size={16} style={{ color: 'var(--primary)' }} />
+                {photoStepCopy.title}
               </p>
               <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
-                {capturedPhoto ? 'Looking good! Confirm to check in.' : 'Take a photo to verify your identity.'}
+                {capturedPhoto ? 'Looking good! Confirm to continue.' : photoStepCopy.subtitle}
               </p>
             </div>
             <button
-              onClick={handleCancelPhotoStep}
+              onClick={clearPhotoState}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '0.25rem', display: 'flex' }}
             >
               <X size={18} />
             </button>
           </div>
 
-          {/* Hidden file input — front camera */}
           <input
             ref={cameraInputRef}
             type="file"
@@ -421,7 +437,6 @@ export default function Dashboard({ user, profile, onLogout }) {
           />
 
           {!capturedPhoto ? (
-            /* Camera trigger */
             <div>
               <button
                 onClick={() => cameraInputRef.current?.click()}
@@ -446,11 +461,10 @@ export default function Dashboard({ user, profile, onLogout }) {
               </p>
             </div>
           ) : (
-            /* Preview + confirm */
             <div>
               <img
                 src={photoPreviewUrl}
-                alt="Check-in selfie preview"
+                alt="Selfie preview"
                 style={{
                   width: '120px', height: '120px',
                   borderRadius: '50%',
@@ -464,12 +478,12 @@ export default function Dashboard({ user, profile, onLogout }) {
                 <button
                   className="btn btn-primary"
                   disabled={loading}
-                  onClick={() => handleConfirmCheckIn(capturedPhoto)}
+                  onClick={handleConfirmPhoto}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}
                 >
                   {loading
                     ? <div className="spinner" style={{ width: '18px', height: '18px' }} />
-                    : <><CheckCircle size={16} /> Confirm Check In</>
+                    : <><CheckCircle size={16} /> {photoMode === 'checkin' ? 'Confirm Check In' : 'Confirm Check Out'}</>
                   }
                 </button>
                 <button
@@ -486,7 +500,7 @@ export default function Dashboard({ user, profile, onLogout }) {
 
           {!navigator.onLine && (
             <p style={{ fontSize: '0.75rem', color: 'var(--warning)', marginTop: '1rem' }}>
-              Offline — photo will be skipped. Check-in will be queued.
+              Offline — photo will be skipped and action will be queued.
             </p>
           )}
         </div>
