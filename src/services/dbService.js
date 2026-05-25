@@ -535,6 +535,27 @@ export const dbService = {
   },
 
   // 6. ADMIN REPORTING
+  async getActiveCheckIns() {
+    const { data, error } = await supabase
+      .from('attendance_sessions')
+      .select('*, profiles(full_name, role), clients(name, address)')
+      .is('check_out_time', null)
+      .order('check_in_time', { ascending: false });
+    if (error) throw error;
+    return data.map(d => ({
+      id: d.id,
+      employee_id: d.employee_id,
+      employee_name: d.profiles?.full_name || 'Unknown',
+      employee_role: d.profiles?.role || 'employee',
+      client_id: d.client_id,
+      client_name: d.clients?.name || 'Unknown Site',
+      client_address: d.clients?.address || '',
+      check_in_time: d.check_in_time,
+      check_in_latitude: d.check_in_latitude,
+      check_in_longitude: d.check_in_longitude,
+    }));
+  },
+
   async getAttendanceLogs() {
     if (navigator.onLine) {
       try {
