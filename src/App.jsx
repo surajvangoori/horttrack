@@ -203,7 +203,7 @@ export default function App() {
 
       <footer style={{ marginTop: '3rem', padding: '1rem 0', textAlign: 'center', borderTop: '1px solid var(--card-border)' }}>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-          HortTrack Verification System &copy; {new Date().getFullYear()} &bull; Secure GPS Tracker
+          HortTrack Verification System &copy; {new Date().getFullYear()} &bull; Secure GPS Tracker &bull; v1.0
         </p>
       </footer>
     </div>
