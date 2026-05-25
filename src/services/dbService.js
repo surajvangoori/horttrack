@@ -152,7 +152,20 @@ export const dbService = {
           .eq('employee_id', employeeId);
         if (error) throw error;
         const clients = data.map(d => d.clients).filter(Boolean);
+
+        // Cache under employee-specific key for offline fallback
         localStorage.setItem(`hort_assigned_clients_${employeeId}`, JSON.stringify(clients));
+
+        // Also merge into hort_clients so checkIn can find them by ID
+        const existing = JSON.parse(localStorage.getItem('hort_clients') || '[]');
+        const merged = [...existing];
+        clients.forEach(c => {
+          const idx = merged.findIndex(e => e.id === c.id);
+          if (idx === -1) merged.push(c);
+          else merged[idx] = c;
+        });
+        localStorage.setItem('hort_clients', JSON.stringify(merged));
+
         return clients;
       } catch (e) {
         console.warn('Network failed. Loading cached assigned clients.', e);
