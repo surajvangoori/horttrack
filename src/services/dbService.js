@@ -572,6 +572,7 @@ export const dbService = {
       check_in_time: d.check_in_time,
       check_in_latitude: d.check_in_latitude,
       check_in_longitude: d.check_in_longitude,
+      check_in_photo_url: d.check_in_photo_url || null,
     }));
   },
 

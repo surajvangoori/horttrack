@@ -920,19 +920,43 @@ export default function AdminPanel({ user, profile }) {
                     gap: '0.75rem'
                   }}
                 >
-                  {/* Employee name + role */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <span
-                      style={{
-                        width: '10px', height: '10px', borderRadius: '50%', flexShrink: 0,
+                  {/* Selfie + name */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div style={{ position: 'relative', flexShrink: 0 }}>
+                      {session.check_in_photo_url ? (
+                        <img
+                          src={session.check_in_photo_url}
+                          alt={`${session.employee_name} selfie`}
+                          style={{
+                            width: '52px', height: '52px', borderRadius: '50%',
+                            objectFit: 'cover',
+                            border: '2px solid rgba(16,185,129,0.5)'
+                          }}
+                        />
+                      ) : (
+                        <div style={{
+                          width: '52px', height: '52px', borderRadius: '50%',
+                          border: '2px solid rgba(16,185,129,0.25)',
+                          background: 'rgba(16,185,129,0.07)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '1.2rem', color: 'var(--text-muted)'
+                        }}>
+                          {session.employee_name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      {/* Pulsing online dot */}
+                      <span style={{
+                        position: 'absolute', bottom: '2px', right: '2px',
+                        width: '10px', height: '10px', borderRadius: '50%',
                         backgroundColor: 'var(--primary)',
-                        boxShadow: '0 0 0 3px rgba(16,185,129,0.25)',
+                        border: '2px solid var(--bg-darker)',
+                        boxShadow: '0 0 0 2px rgba(16,185,129,0.3)',
                         animation: 'pulse 2s infinite'
-                      }}
-                    />
+                      }} />
+                    </div>
                     <div>
                       <div style={{ fontWeight: '700', color: '#fff', fontSize: '0.95rem' }}>{session.employee_name}</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'capitalize' }}>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                         {session.employee_role === 'admin' ? 'Admin' : 'Field Worker'}
                       </div>
                     </div>
