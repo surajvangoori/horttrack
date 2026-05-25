@@ -730,13 +730,14 @@ export default function AdminPanel({ user, profile }) {
                   <th>Date</th>
                   <th>Check In / Out</th>
                   <th>Duration</th>
+                  <th>Photo</th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {attendanceLogs.length === 0 ? (
                   <tr>
-                    <td colSpan="6" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>
+                    <td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>
                       No shifts logged in database yet.
                     </td>
                   </tr>
@@ -759,6 +760,19 @@ export default function AdminPanel({ user, profile }) {
                         </span>
                       </td>
                       <td>{calculateDuration(log.check_in_time, log.check_out_time)}</td>
+                      <td>
+                        {log.check_in_photo_url ? (
+                          <a href={log.check_in_photo_url} target="_blank" rel="noopener noreferrer">
+                            <img
+                              src={log.check_in_photo_url}
+                              alt="Check-in selfie"
+                              style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(16,185,129,0.4)', display: 'block' }}
+                            />
+                          </a>
+                        ) : (
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>—</span>
+                        )}
+                      </td>
                       <td>
                         <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', width: 'auto' }} onClick={() => handleViewSessionPings(log)}>
                           Inspect Pings
