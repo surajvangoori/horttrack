@@ -60,7 +60,7 @@ export default function AdminPanel({ user, profile }) {
     setMemberSuccess('');
     setMemberLoading(true);
     try {
-      await dbService.createEmployee(newMemberEmail, newMemberPassword, newMemberName, newMemberRole);
+      await dbService.createEmployee(newMemberEmail, newMemberPassword, newMemberName, newMemberRole, profile.id);
       setMemberSuccess(`Account created for ${newMemberName}. They will receive a confirmation email at ${newMemberEmail}.`);
       setNewMemberName('');
       setNewMemberEmail('');
@@ -613,6 +613,10 @@ export default function AdminPanel({ user, profile }) {
                       </div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
                         {emp.role === 'admin' ? 'Admin' : 'Field Worker'} &bull; Joined {new Date(emp.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {emp.created_by && (() => {
+                          const creator = employees.find(e => e.id === emp.created_by);
+                          return creator ? ` · Added by ${creator.full_name.split(' ')[0]}` : null;
+                        })()}
                       </div>
                     </div>
                     {isExpanded ? <ChevronUp size={16} color="var(--text-secondary)" /> : <ChevronDown size={16} color="var(--text-secondary)" />}

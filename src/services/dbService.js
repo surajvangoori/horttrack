@@ -65,11 +65,13 @@ export const dbService = {
   },
 
   // 2. EMPLOYEE MANAGEMENT
-  async createEmployee(email, password, fullName, role = 'employee') {
-    // Use a separate client instance so the admin's current session is not disturbed
+  async createEmployee(email, password, fullName, role = 'employee', createdBy = null) {
+    // persistSession: false keeps this client's session in memory only,
+    // so it never touches localStorage and cannot disturb the admin's session.
     const tempClient = createClient(
       import.meta.env.VITE_SUPABASE_URL,
-      import.meta.env.VITE_SUPABASE_ANON_KEY
+      import.meta.env.VITE_SUPABASE_ANON_KEY,
+      { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }
     );
 
     const { data, error } = await tempClient.auth.signUp({
@@ -81,9 +83,13 @@ export const dbService = {
     if (error) throw error;
     if (!data.user) throw new Error('Account creation failed. The email may already be registered.');
 
-    // The handle_new_user DB trigger auto-creates the profile from signup metadata.
-    // Sign out of the temp client immediately so no orphaned session lingers.
-    await tempClient.auth.signOut();
+    // Record which admin created this account
+    if (createdBy) {
+      await supabase
+        .from('profiles')
+        .update({ created_by: createdBy })
+        .eq('id', data.user.id);
+    }
 
     return data.user;
   },
