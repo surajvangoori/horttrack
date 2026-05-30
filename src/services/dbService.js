@@ -50,6 +50,13 @@ export const dbService = {
     await supabase.auth.signOut();
   },
 
+  async sendPasswordResetEmail(email) {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+    if (error) throw error;
+  },
+
   async getCurrentUser() {
     if (!supabase) return null;
     const { data: { user } } = await supabase.auth.getUser();

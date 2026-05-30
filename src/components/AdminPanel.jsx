@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, User, MapPin, Database, Download, Pencil, Trash2, Users, UserPlus, ChevronDown, ChevronUp, Mail, Lock, X, Activity, RefreshCw, Clock } from 'lucide-react';
+import { Plus, User, MapPin, Database, Download, Pencil, Trash2, Users, UserPlus, ChevronDown, ChevronUp, Mail, Lock, X, Activity, RefreshCw, Clock, KeyRound } from 'lucide-react';
 import { dbService } from '../services/dbService';
 
 export default function AdminPanel({ user, profile }) {
@@ -7,6 +7,7 @@ export default function AdminPanel({ user, profile }) {
 
   const [clients, setClients] = useState([]);
   const [employees, setEmployees] = useState([]);
+
   // Add member form
   const [showAddMember, setShowAddMember] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
@@ -16,22 +17,36 @@ export default function AdminPanel({ user, profile }) {
   const [memberLoading, setMemberLoading] = useState(false);
   const [memberError, setMemberError] = useState('');
   const [memberSuccess, setMemberSuccess] = useState('');
+
   // Expand / edit employee
   const [expandedEmpId, setExpandedEmpId] = useState(null);
   const [editEmpName, setEditEmpName] = useState('');
   const [editEmpRole, setEditEmpRole] = useState('');
   const [editEmpLoading, setEditEmpLoading] = useState(false);
   const [editEmpError, setEditEmpError] = useState('');
+
+  // Password reset
+  const [resetPwdLoading, setResetPwdLoading] = useState(false);
+  const [resetPwdMsg, setResetPwdMsg] = useState(null); // { type: 'success'|'error', text }
+
   // Site assignments
   const [empSites, setEmpSites] = useState({});
   const [siteLoading, setSiteLoading] = useState(false);
   const [addSiteId, setAddSiteId] = useState('');
   const [siteError, setSiteError] = useState('');
+
   const [attendanceLogs, setAttendanceLogs] = useState([]);
   const [selectedSessionLogs, setSelectedSessionLogs] = useState([]);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
 
-  // Create/edit client form state
+  // Attendance filters
+  const [filterEmployee, setFilterEmployee] = useState('');
+  const [filterSite, setFilterSite] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
+
+  // Create/edit client form
   const [editingClient, setEditingClient] = useState(null);
   const [clientName, setClientName] = useState('');
   const [clientAddress, setClientAddress] = useState('');
@@ -42,7 +57,7 @@ export default function AdminPanel({ user, profile }) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Live View state
+  // Live View
   const [activeCheckIns, setActiveCheckIns] = useState([]);
   const [liveLoading, setLiveLoading] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState('');
@@ -54,7 +69,6 @@ export default function AdminPanel({ user, profile }) {
     fetchAttendanceLogs();
   }, []);
 
-  // Start/stop auto-refresh when switching to/from Live tab
   useEffect(() => {
     if (activeTab === 'live') {
       fetchActiveCheckIns();
@@ -73,6 +87,32 @@ export default function AdminPanel({ user, profile }) {
     };
   }, [activeTab]);
 
+  // ── Derived: filtered attendance logs ────────────────────
+  const filteredLogs = attendanceLogs.filter(log => {
+    if (filterEmployee && log.employee_id !== filterEmployee) return false;
+    if (filterSite && log.client_id !== filterSite) return false;
+    if (filterDateFrom && new Date(log.check_in_time) < new Date(filterDateFrom)) return false;
+    if (filterDateTo) {
+      const to = new Date(filterDateTo);
+      to.setHours(23, 59, 59, 999);
+      if (new Date(log.check_in_time) > to) return false;
+    }
+    if (filterStatus === 'active' && log.check_out_time) return false;
+    if (filterStatus === 'completed' && !log.check_out_time) return false;
+    return true;
+  });
+
+  const hasActiveFilters = filterEmployee || filterSite || filterDateFrom || filterDateTo || filterStatus !== 'all';
+
+  const clearFilters = () => {
+    setFilterEmployee('');
+    setFilterSite('');
+    setFilterDateFrom('');
+    setFilterDateTo('');
+    setFilterStatus('all');
+  };
+
+  // ── Data fetchers ─────────────────────────────────────────
   const fetchActiveCheckIns = async () => {
     setLiveLoading(true);
     try {
@@ -95,6 +135,25 @@ export default function AdminPanel({ user, profile }) {
     }
   };
 
+  const fetchClients = async () => {
+    try {
+      const data = await dbService.getClients();
+      setClients(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchAttendanceLogs = async () => {
+    try {
+      const data = await dbService.getAttendanceLogs();
+      setAttendanceLogs(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // ── Employee handlers ─────────────────────────────────────
   const handleCreateMember = async (e) => {
     e.preventDefault();
     setMemberError('');
@@ -121,6 +180,7 @@ export default function AdminPanel({ user, profile }) {
       setExpandedEmpId(null);
       setEditEmpError('');
       setSiteError('');
+      setResetPwdMsg(null);
       return;
     }
     setExpandedEmpId(emp.id);
@@ -128,6 +188,7 @@ export default function AdminPanel({ user, profile }) {
     setEditEmpRole(emp.role);
     setEditEmpError('');
     setSiteError('');
+    setResetPwdMsg(null);
     setAddSiteId('');
     if (!empSites[emp.id]) {
       setSiteLoading(true);
@@ -167,6 +228,25 @@ export default function AdminPanel({ user, profile }) {
     }
   };
 
+  const handleResetPassword = async (emp) => {
+    const email = emp.email;
+    if (!email) {
+      setResetPwdMsg({ type: 'error', text: 'No email on record. Run the SQL migration to add the email column to profiles.' });
+      return;
+    }
+    setResetPwdLoading(true);
+    setResetPwdMsg(null);
+    try {
+      await dbService.sendPasswordResetEmail(email);
+      setResetPwdMsg({ type: 'success', text: `Reset link sent to ${email}.` });
+    } catch (err) {
+      setResetPwdMsg({ type: 'error', text: err.message || 'Failed to send reset email.' });
+    } finally {
+      setResetPwdLoading(false);
+    }
+  };
+
+  // ── Site assignment handlers ───────────────────────────────
   const handleAssignSite = async (empId) => {
     if (!addSiteId) return;
     setSiteLoading(true);
@@ -177,7 +257,7 @@ export default function AdminPanel({ user, profile }) {
       setEmpSites(prev => ({ ...prev, [empId]: [...(prev[empId] || []), newClient] }));
       setAddSiteId('');
     } catch (err) {
-      setSiteError(err.message || 'Failed to assign site. Check that the RLS policy has been updated in Supabase.');
+      setSiteError(err.message || 'Failed to assign site.');
     } finally {
       setSiteLoading(false);
     }
@@ -196,24 +276,7 @@ export default function AdminPanel({ user, profile }) {
     }
   };
 
-  const fetchClients = async () => {
-    try {
-      const data = await dbService.getClients();
-      setClients(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const fetchAttendanceLogs = async () => {
-    try {
-      const data = await dbService.getAttendanceLogs();
-      setAttendanceLogs(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
+  // ── Client handlers ───────────────────────────────────────
   const handleDeleteClient = async (client) => {
     if (!window.confirm(`Delete "${client.name}"? This cannot be undone.`)) return;
     setError('');
@@ -251,31 +314,18 @@ export default function AdminPanel({ user, profile }) {
     setError('');
     setSuccess('');
     setLoading(true);
-
     if (!clientName || !clientLat || !clientLng) {
       setError('Client name, latitude, and longitude are required.');
       setLoading(false);
       return;
     }
-
     try {
       if (editingClient) {
-        await dbService.updateClient(
-          editingClient.id,
-          clientName,
-          clientAddress,
-          parseFloat(clientLat),
-          parseFloat(clientLng)
-        );
+        await dbService.updateClient(editingClient.id, clientName, clientAddress, parseFloat(clientLat), parseFloat(clientLng));
         setSuccess(`Client "${clientName}" updated successfully.`);
         setEditingClient(null);
       } else {
-        await dbService.addClient(
-          clientName,
-          clientAddress,
-          parseFloat(clientLat),
-          parseFloat(clientLng)
-        );
+        await dbService.addClient(clientName, clientAddress, parseFloat(clientLat), parseFloat(clientLng));
         setSuccess(`Client "${clientName}" added successfully.`);
       }
       setClientName('');
@@ -290,6 +340,22 @@ export default function AdminPanel({ user, profile }) {
     }
   };
 
+  const handleUseCurrentLocation = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setClientLat(pos.coords.latitude.toFixed(6));
+          setClientLng(pos.coords.longitude.toFixed(6));
+          setSuccess('Populated coordinates with your current position.');
+        },
+        (err) => setError(`Unable to get location: ${err.message}`)
+      );
+    } else {
+      setError('Geolocation is not supported by your browser.');
+    }
+  };
+
+  // ── Attendance handlers ───────────────────────────────────
   const handleViewSessionPings = async (session) => {
     try {
       setSelectedSessionId(session.id);
@@ -301,46 +367,28 @@ export default function AdminPanel({ user, profile }) {
   };
 
   const handleExportCSV = () => {
-    if (attendanceLogs.length === 0) {
-      setError('No logs available to export.');
+    if (filteredLogs.length === 0) {
+      setError('No logs match the current filters.');
       return;
     }
-
-    const headers = [
-      'Representative',
-      'Client Site',
-      'Date',
-      'Check-In Time',
-      'Check-In Lat/Lng',
-      'Check-Out Time',
-      'Check-Out Lat/Lng',
-      'Duration (Mins)'
-    ];
-
-    const rows = attendanceLogs.map((log) => {
+    const headers = ['Representative', 'Client Site', 'Date', 'Check-In Time', 'Check-In Lat/Lng', 'Check-Out Time', 'Check-Out Lat/Lng', 'Duration (Mins)'];
+    const rows = filteredLogs.map((log) => {
       const workerName = `"${log.employee_name.replace(/"/g, '""')}"`;
       const clientName = `"${log.client_name.replace(/"/g, '""')}"`;
-      const dateStr = formatDate(log.check_in_time);
-      const checkInTime = formatTime(log.check_in_time);
-      const checkInCoords = `"${log.check_in_latitude || 0}, ${log.check_in_longitude || 0}"`;
       const checkOutTime = log.check_out_time ? formatTime(log.check_out_time) : 'Active Shift';
-      const checkOutCoords = log.check_out_time
-        ? `"${log.check_out_latitude || 0}, ${log.check_out_longitude || 0}"`
-        : '"N/A"';
+      const checkOutCoords = log.check_out_time ? `"${log.check_out_latitude || 0}, ${log.check_out_longitude || 0}"` : '"N/A"';
       let durationMins = 'In Progress';
       if (log.check_out_time) {
-        const diffMs = new Date(log.check_out_time) - new Date(log.check_in_time);
-        durationMins = Math.floor(diffMs / 60000);
+        durationMins = Math.floor((new Date(log.check_out_time) - new Date(log.check_in_time)) / 60000);
       }
-      return [workerName, clientName, dateStr, checkInTime, checkInCoords, checkOutTime, checkOutCoords, durationMins].join(',');
+      return [workerName, clientName, formatDate(log.check_in_time), formatTime(log.check_in_time), `"${log.check_in_latitude || 0}, ${log.check_in_longitude || 0}"`, checkOutTime, checkOutCoords, durationMins].join(',');
     });
-
     const csvContent = [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `horttrack_attendance_report_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `horttrack_attendance_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -348,19 +396,17 @@ export default function AdminPanel({ user, profile }) {
     setSuccess('Exported attendance report successfully.');
   };
 
-  const formatTime = (isoString) => {
-    if (!isoString) return 'Active Now';
-    return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // ── Helpers ───────────────────────────────────────────────
+  const formatTime = (iso) => {
+    if (!iso) return 'Active Now';
+    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  const formatDate = (isoString) => {
-    return new Date(isoString).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
-  };
+  const formatDate = (iso) => new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 
   const calculateDuration = (inTime, outTime) => {
     if (!outTime) return 'In Progress';
-    const diffMs = new Date(outTime) - new Date(inTime);
-    const diffMins = Math.floor(diffMs / 60000);
+    const diffMins = Math.floor((new Date(outTime) - new Date(inTime)) / 60000);
     const hrs = Math.floor(diffMins / 60);
     const mins = diffMins % 60;
     return hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
@@ -373,21 +419,16 @@ export default function AdminPanel({ user, profile }) {
     return hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
   };
 
-  const handleUseCurrentLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setClientLat(pos.coords.latitude.toFixed(6));
-          setClientLng(pos.coords.longitude.toFixed(6));
-          setSuccess('Populated coordinates with your current position.');
-        },
-        (err) => {
-          setError(`Unable to get location: ${err.message}`);
-        }
-      );
-    } else {
-      setError('Geolocation is not supported by your browser.');
-    }
+  // ── Shared input style for filter bar ─────────────────────
+  const filterInputStyle = {
+    background: 'var(--input-bg)',
+    border: '1px solid var(--card-border)',
+    borderRadius: '6px',
+    color: '#fff',
+    fontSize: '0.8rem',
+    padding: '0.35rem 0.6rem',
+    fontFamily: 'inherit',
+    cursor: 'pointer',
   };
 
   return (
@@ -401,14 +442,18 @@ export default function AdminPanel({ user, profile }) {
           <Users size={15} /> Team
         </button>
         <button className={`tab-btn ${activeTab === 'attendance' ? 'active' : ''}`} onClick={() => setActiveTab('attendance')}>
-          <Database size={15} /> Attendance
+          <Database size={15} />
+          Attendance
+          {hasActiveFilters && (
+            <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--warning)', flexShrink: 0 }} />
+          )}
         </button>
         <button className={`tab-btn ${activeTab === 'live' ? 'active' : ''}`} onClick={() => setActiveTab('live')}>
           <Activity size={15} /> Live View
         </button>
       </div>
 
-      {/* SITES TAB */}
+      {/* ── SITES TAB ── */}
       {activeTab === 'sites' && (
         <div className="card" style={{ padding: '1.5rem', maxWidth: '600px', margin: '0 auto' }}>
           <h3 className="card-title" style={{ fontSize: '1.35rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -424,77 +469,35 @@ export default function AdminPanel({ user, profile }) {
             <div className="form-group">
               <label className="form-label">Client / Estate Name</label>
               <div className="input-container">
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Royal Botanical Garden"
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  required
-                />
+                <input type="text" className="form-input" placeholder="e.g. Royal Botanical Garden" value={clientName} onChange={(e) => setClientName(e.target.value)} required />
                 <User className="input-icon" size={16} />
               </div>
             </div>
-
             <div className="form-group">
               <label className="form-label">Address</label>
               <div className="input-container">
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. MG Road, Bengaluru"
-                  value={clientAddress}
-                  onChange={(e) => setClientAddress(e.target.value)}
-                />
+                <input type="text" className="form-input" placeholder="e.g. MG Road, Bengaluru" value={clientAddress} onChange={(e) => setClientAddress(e.target.value)} />
                 <MapPin className="input-icon" size={16} />
               </div>
             </div>
-
             <div className="form-group">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <label className="form-label">Coordinates</label>
-                <button
-                  type="button"
-                  style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer', textDecoration: 'underline' }}
-                  onClick={handleUseCurrentLocation}
-                >
+                <button type="button" style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: '0.75rem', fontWeight: '600', cursor: 'pointer', textDecoration: 'underline' }} onClick={handleUseCurrentLocation}>
                   Use My Location
                 </button>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                <input
-                  type="number"
-                  step="0.000001"
-                  className="form-input"
-                  style={{ paddingLeft: '1rem' }}
-                  placeholder="Latitude"
-                  value={clientLat}
-                  onChange={(e) => setClientLat(e.target.value)}
-                  required
-                />
-                <input
-                  type="number"
-                  step="0.000001"
-                  className="form-input"
-                  style={{ paddingLeft: '1rem' }}
-                  placeholder="Longitude"
-                  value={clientLng}
-                  onChange={(e) => setClientLng(e.target.value)}
-                  required
-                />
+                <input type="number" step="0.000001" className="form-input" style={{ paddingLeft: '1rem' }} placeholder="Latitude" value={clientLat} onChange={(e) => setClientLat(e.target.value)} required />
+                <input type="number" step="0.000001" className="form-input" style={{ paddingLeft: '1rem' }} placeholder="Longitude" value={clientLng} onChange={(e) => setClientLng(e.target.value)} required />
               </div>
             </div>
-
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
               <button type="submit" className="btn btn-primary" disabled={loading}>
-                {loading
-                  ? <div className="spinner" style={{ width: '18px', height: '18px' }} />
-                  : editingClient ? 'Save Changes' : 'Register Client Location'}
+                {loading ? <div className="spinner" style={{ width: '18px', height: '18px' }} /> : editingClient ? 'Save Changes' : 'Register Client Location'}
               </button>
               {editingClient && (
-                <button type="button" className="btn btn-secondary" onClick={handleCancelEdit} style={{ width: 'auto', padding: '0 1rem' }}>
-                  Cancel
-                </button>
+                <button type="button" className="btn btn-secondary" onClick={handleCancelEdit} style={{ width: 'auto', padding: '0 1rem' }}>Cancel</button>
               )}
             </div>
           </form>
@@ -506,28 +509,14 @@ export default function AdminPanel({ user, profile }) {
                 <div key={c.id} className="log-item" style={{ padding: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontWeight: '600', color: '#fff' }}>{c.name}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0.2rem 0' }}>
-                      {c.address || 'No address specified'}
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                      🌐 {c.latitude.toFixed(5)}, {c.longitude.toFixed(5)} (100m Geofence)
-                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0.2rem 0' }}>{c.address || 'No address specified'}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>🌐 {c.latitude.toFixed(5)}, {c.longitude.toFixed(5)} (100m Geofence)</div>
                   </div>
                   <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ width: 'auto', padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
-                      onClick={() => handleEditClient(c)}
-                    >
+                    <button type="button" className="btn btn-secondary" style={{ width: 'auto', padding: '0.25rem 0.6rem', fontSize: '0.75rem' }} onClick={() => handleEditClient(c)}>
                       <Pencil size={12} />
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ width: 'auto', padding: '0.25rem 0.6rem', fontSize: '0.75rem', color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.3)' }}
-                      onClick={() => handleDeleteClient(c)}
-                    >
+                    <button type="button" className="btn btn-secondary" style={{ width: 'auto', padding: '0.25rem 0.6rem', fontSize: '0.75rem', color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.3)' }} onClick={() => handleDeleteClient(c)}>
                       <Trash2 size={12} />
                     </button>
                   </div>
@@ -538,7 +527,7 @@ export default function AdminPanel({ user, profile }) {
         </div>
       )}
 
-      {/* TEAM TAB */}
+      {/* ── TEAM TAB ── */}
       {activeTab === 'team' && (
         <div className="card" style={{ padding: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
@@ -546,16 +535,12 @@ export default function AdminPanel({ user, profile }) {
               <Users size={20} className="logo-icon" />
               <span>Team Members</span>
             </h3>
-            <button
-              className="btn btn-primary"
-              style={{ width: 'auto', padding: '0.4rem 0.85rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-              onClick={() => { setShowAddMember(v => !v); setMemberError(''); setMemberSuccess(''); }}
-            >
+            <button className="btn btn-primary" style={{ width: 'auto', padding: '0.4rem 0.85rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }} onClick={() => { setShowAddMember(v => !v); setMemberError(''); setMemberSuccess(''); }}>
               {showAddMember ? <ChevronUp size={14} /> : <UserPlus size={14} />}
               {showAddMember ? 'Cancel' : 'Add Member'}
             </button>
           </div>
-          <p className="card-subtitle">All registered accounts. Change a member's role using the dropdown.</p>
+          <p className="card-subtitle">All registered accounts. Expand a member to edit their profile or reset their password.</p>
 
           {memberSuccess && <div className="alert alert-success" style={{ padding: '0.75rem', marginBottom: '1rem' }}>{memberSuccess}</div>}
           {memberError && <div className="alert alert-danger" style={{ padding: '0.75rem', marginBottom: '1rem' }}>{memberError}</div>}
@@ -599,9 +584,7 @@ export default function AdminPanel({ user, profile }) {
 
           <div className="log-list" style={{ maxHeight: '600px' }}>
             {employees.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '2rem 0' }}>
-                No team members found.
-              </p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '2rem 0' }}>No team members found.</p>
             ) : (
               employees.map((emp) => {
                 const isExpanded = expandedEmpId === emp.id;
@@ -610,11 +593,8 @@ export default function AdminPanel({ user, profile }) {
 
                 return (
                   <div key={emp.id} style={{ borderBottom: '1px solid var(--card-border)' }}>
-                    <div
-                      className="log-item"
-                      style={{ padding: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', borderBottom: 'none' }}
-                      onClick={() => handleToggleEmployee(emp)}
-                    >
+                    {/* Collapsed row */}
+                    <div className="log-item" style={{ padding: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', borderBottom: 'none' }} onClick={() => handleToggleEmployee(emp)}>
                       <div>
                         <div style={{ fontWeight: '600', color: '#fff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <span className="user-dot" style={{ backgroundColor: emp.role === 'admin' ? 'var(--secondary)' : 'var(--primary)' }} />
@@ -631,10 +611,12 @@ export default function AdminPanel({ user, profile }) {
                       {isExpanded ? <ChevronUp size={16} color="var(--text-secondary)" /> : <ChevronDown size={16} color="var(--text-secondary)" />}
                     </div>
 
+                    {/* Expanded panel */}
                     {isExpanded && (
                       <div style={{ padding: '0 0.75rem 1rem', background: 'rgba(255,255,255,0.02)' }}>
                         {editEmpError && <div className="alert alert-danger" style={{ padding: '0.5rem 0.75rem', marginBottom: '0.75rem', fontSize: '0.8rem' }}>{editEmpError}</div>}
 
+                        {/* Edit name + role */}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.75rem' }}>
                           <div className="form-group" style={{ marginBottom: 0 }}>
                             <label className="form-label" style={{ fontSize: '0.72rem' }}>Full Name</label>
@@ -648,15 +630,34 @@ export default function AdminPanel({ user, profile }) {
                             </select>
                           </div>
                         </div>
-                        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+
+                        {/* Action buttons row */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
                           <button className="btn btn-primary" style={{ width: 'auto', padding: '0.3rem 0.85rem', fontSize: '0.8rem' }} disabled={editEmpLoading} onClick={() => handleSaveEmployee(emp.id)}>
                             {editEmpLoading ? <div className="spinner" style={{ width: '14px', height: '14px' }} /> : 'Save Changes'}
                           </button>
-                          <button className="btn btn-secondary" style={{ width: 'auto', padding: '0.3rem 0.85rem', fontSize: '0.8rem', color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.3)' }} onClick={() => handleDeleteEmployee(emp)}>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ width: 'auto', padding: '0.3rem 0.85rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                            disabled={resetPwdLoading}
+                            onClick={() => handleResetPassword(emp)}
+                          >
+                            {resetPwdLoading ? <div className="spinner" style={{ width: '13px', height: '13px' }} /> : <KeyRound size={13} />}
+                            Reset Password
+                          </button>
+                          <button className="btn btn-secondary" style={{ width: 'auto', padding: '0.3rem 0.85rem', fontSize: '0.8rem', color: 'var(--danger)', borderColor: 'rgba(239,68,68,0.3)', display: 'flex', alignItems: 'center', gap: '0.35rem' }} onClick={() => handleDeleteEmployee(emp)}>
                             <Trash2 size={13} /> Delete Account
                           </button>
                         </div>
 
+                        {/* Password reset feedback */}
+                        {resetPwdMsg && (
+                          <div className={`alert ${resetPwdMsg.type === 'success' ? 'alert-success' : 'alert-danger'}`} style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', marginBottom: '0.75rem' }}>
+                            {resetPwdMsg.text}
+                          </div>
+                        )}
+
+                        {/* Site assignments */}
                         <div>
                           <p style={{ fontSize: '0.72rem', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>Assigned Sites</p>
                           {siteError && <div className="alert alert-danger" style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', marginBottom: '0.5rem' }}>{siteError}</div>}
@@ -704,7 +705,7 @@ export default function AdminPanel({ user, profile }) {
         </div>
       )}
 
-      {/* ATTENDANCE TAB */}
+      {/* ── ATTENDANCE TAB ── */}
       {activeTab === 'attendance' && (
         <div className="card" style={{ padding: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -719,8 +720,62 @@ export default function AdminPanel({ user, profile }) {
               <span>Export to CSV</span>
             </button>
           </div>
-          <p className="card-subtitle" style={{ marginBottom: '1.5rem' }}>Review check-in entries, check-out validations, and hourly location pings.</p>
+          <p className="card-subtitle" style={{ marginBottom: '1rem' }}>Filter and review check-in entries, check-out validations, and location pings.</p>
 
+          {/* Filter bar */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', padding: '0.75rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--card-border)', borderRadius: '8px', marginBottom: '1rem' }}>
+            {/* Employee */}
+            <select value={filterEmployee} onChange={(e) => setFilterEmployee(e.target.value)} style={filterInputStyle}>
+              <option value="">All Employees</option>
+              {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+            </select>
+
+            {/* Site */}
+            <select value={filterSite} onChange={(e) => setFilterSite(e.target.value)} style={filterInputStyle}>
+              <option value="">All Sites</option>
+              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+
+            {/* Status */}
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={filterInputStyle}>
+              <option value="all">All Status</option>
+              <option value="active">On Duty</option>
+              <option value="completed">Completed</option>
+            </select>
+
+            {/* Date from */}
+            <input
+              type="date"
+              value={filterDateFrom}
+              onChange={(e) => setFilterDateFrom(e.target.value)}
+              style={{ ...filterInputStyle, colorScheme: 'dark' }}
+              title="Check-in from"
+            />
+
+            {/* Date to */}
+            <input
+              type="date"
+              value={filterDateTo}
+              onChange={(e) => setFilterDateTo(e.target.value)}
+              style={{ ...filterInputStyle, colorScheme: 'dark' }}
+              title="Check-in to"
+            />
+
+            {/* Clear */}
+            {hasActiveFilters && (
+              <button onClick={clearFilters} style={{ ...filterInputStyle, display: 'flex', alignItems: 'center', gap: '0.3rem', color: 'var(--warning)', borderColor: 'rgba(245,158,11,0.3)', cursor: 'pointer' }}>
+                <X size={12} /> Clear
+              </button>
+            )}
+
+            {/* Result count */}
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+              {filteredLogs.length} result{filteredLogs.length !== 1 ? 's' : ''}
+              {hasActiveFilters && attendanceLogs.length !== filteredLogs.length && ` of ${attendanceLogs.length}`}
+            </span>
+          </div>
+
+          {/* Table */}
           <div className="table-container">
             <table className="data-table">
               <thead>
@@ -735,14 +790,14 @@ export default function AdminPanel({ user, profile }) {
                 </tr>
               </thead>
               <tbody>
-                {attendanceLogs.length === 0 ? (
+                {filteredLogs.length === 0 ? (
                   <tr>
                     <td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>
-                      No shifts logged in database yet.
+                      {hasActiveFilters ? 'No shifts match the current filters.' : 'No shifts logged in database yet.'}
                     </td>
                   </tr>
                 ) : (
-                  attendanceLogs.map((log) => (
+                  filteredLogs.map((log) => (
                     <tr key={log.id} style={{ background: selectedSessionId === log.id ? 'rgba(255,255,255,0.05)' : 'none' }}>
                       <td>
                         <div style={{ fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -790,6 +845,7 @@ export default function AdminPanel({ user, profile }) {
             </table>
           </div>
 
+          {/* Session ping audit */}
           {selectedSessionId && (
             <div style={{ marginTop: '2rem', padding: '1rem', border: '1px solid var(--card-border)', borderRadius: '8px', background: 'rgba(255,255,255,0.01)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -797,75 +853,57 @@ export default function AdminPanel({ user, profile }) {
                   <h4 style={{ fontSize: '1rem', fontWeight: '700', color: '#fff' }}>Device Pings Audit Log</h4>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Showing GPS telemetry captured from worker device during shift.</p>
                 </div>
-                <button className="btn btn-secondary" style={{ fontSize: '0.75rem', width: 'auto', padding: '0.25rem 0.5rem' }} onClick={() => setSelectedSessionId(null)}>
-                  Close Audit
-                </button>
+                <button className="btn btn-secondary" style={{ fontSize: '0.75rem', width: 'auto', padding: '0.25rem 0.5rem' }} onClick={() => setSelectedSessionId(null)}>Close Audit</button>
               </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
-                <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                  <table className="data-table" style={{ fontSize: '0.8rem' }}>
-                    <thead>
-                      <tr>
-                        <th>Time Captured</th>
-                        <th>Coordinates (Lat/Lng)</th>
-                        <th>Battery</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedSessionLogs.length === 0 ? (
-                        <tr>
-                          <td colSpan="3" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                            No background telemetry records written for this shift.
-                          </td>
+              <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                <table className="data-table" style={{ fontSize: '0.8rem' }}>
+                  <thead>
+                    <tr>
+                      <th>Time Captured</th>
+                      <th>Coordinates (Lat/Lng)</th>
+                      <th>Battery</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedSessionLogs.length === 0 ? (
+                      <tr><td colSpan="3" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No background telemetry records written for this shift.</td></tr>
+                    ) : (
+                      selectedSessionLogs.map((ping, idx) => (
+                        <tr key={ping.id || idx}>
+                          <td>{new Date(ping.timestamp).toLocaleTimeString()}</td>
+                          <td style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>{ping.latitude.toFixed(6)}, {ping.longitude.toFixed(6)}</td>
+                          <td>🔋 {ping.battery_level}%</td>
                         </tr>
-                      ) : (
-                        selectedSessionLogs.map((ping, idx) => (
-                          <tr key={ping.id || idx}>
-                            <td>{new Date(ping.timestamp).toLocaleTimeString()}</td>
-                            <td style={{ color: 'var(--primary)', fontFamily: 'monospace' }}>
-                              {ping.latitude.toFixed(6)}, {ping.longitude.toFixed(6)}
-                            </td>
-                            <td>🔋 {ping.battery_level}%</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="map-placeholder" style={{ marginTop: '1rem' }}>
+                <div className="map-radar"><div className="map-sweep"></div></div>
+                <div style={{ zIndex: 1 }}>
+                  <p style={{ color: '#fff', fontSize: '0.85rem', fontWeight: '600' }}>GPS Telemetry Plotter</p>
+                  <p style={{ fontSize: '0.75rem' }}>{selectedSessionLogs.length > 0 ? `Plotted ${selectedSessionLogs.length} coordinates for this employee.` : 'Waiting for coordinates mapping...'}</p>
                 </div>
-
-                <div className="map-placeholder">
-                  <div className="map-radar">
-                    <div className="map-sweep"></div>
-                  </div>
-                  <div style={{ zIndex: 1 }}>
-                    <p style={{ color: '#fff', fontSize: '0.85rem', fontWeight: '600' }}>GPS Telemetry Plotter</p>
-                    <p style={{ fontSize: '0.75rem' }}>
-                      {selectedSessionLogs.length > 0
-                        ? `Plotted ${selectedSessionLogs.length} coordinates for this employee.`
-                        : 'Waiting for coordinates mapping...'}
-                    </p>
-                  </div>
-                  {selectedSessionLogs.length > 0 && (
-                    <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.2rem', zIndex: 1 }}>
-                      <span style={{ fontSize: '0.7rem', background: 'rgba(16,185,129,0.2)', color: 'var(--primary)', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
-                        Start: {selectedSessionLogs[0].latitude.toFixed(4)}, {selectedSessionLogs[0].longitude.toFixed(4)}
+                {selectedSessionLogs.length > 0 && (
+                  <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.2rem', zIndex: 1 }}>
+                    <span style={{ fontSize: '0.7rem', background: 'rgba(16,185,129,0.2)', color: 'var(--primary)', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
+                      Start: {selectedSessionLogs[0].latitude.toFixed(4)}, {selectedSessionLogs[0].longitude.toFixed(4)}
+                    </span>
+                    {selectedSessionLogs.length > 1 && (
+                      <span style={{ fontSize: '0.7rem', background: 'rgba(99,102,241,0.2)', color: 'var(--secondary)', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
+                        Last: {selectedSessionLogs[selectedSessionLogs.length - 1].latitude.toFixed(4)}, {selectedSessionLogs[selectedSessionLogs.length - 1].longitude.toFixed(4)}
                       </span>
-                      {selectedSessionLogs.length > 1 && (
-                        <span style={{ fontSize: '0.7rem', background: 'rgba(99,102,241,0.2)', color: 'var(--secondary)', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
-                          Last: {selectedSessionLogs[selectedSessionLogs.length - 1].latitude.toFixed(4)}, {selectedSessionLogs[selectedSessionLogs.length - 1].longitude.toFixed(4)}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* LIVE VIEW TAB */}
+      {/* ── LIVE VIEW TAB ── */}
       {activeTab === 'live' && (
         <div className="card" style={{ padding: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
@@ -882,17 +920,8 @@ export default function AdminPanel({ user, profile }) {
               <p className="card-subtitle">Employees currently checked in. Auto-refreshes every 30 seconds.</p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              {lastRefreshed && (
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  Updated {lastRefreshed}
-                </span>
-              )}
-              <button
-                className="btn btn-secondary"
-                onClick={fetchActiveCheckIns}
-                disabled={liveLoading}
-                style={{ width: 'auto', padding: '0.35rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
-              >
+              {lastRefreshed && <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Updated {lastRefreshed}</span>}
+              <button className="btn btn-secondary" onClick={fetchActiveCheckIns} disabled={liveLoading} style={{ width: 'auto', padding: '0.35rem 0.75rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                 <RefreshCw size={14} className={liveLoading ? 'spinner' : ''} style={{ border: 'none', animationDuration: '1.5s' }} />
                 <span>Refresh</span>
               </button>
@@ -913,51 +942,18 @@ export default function AdminPanel({ user, profile }) {
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
               {activeCheckIns.map((session) => (
-                <div
-                  key={session.id}
-                  style={{
-                    padding: '1.1rem',
-                    border: '1px solid rgba(16,185,129,0.2)',
-                    borderRadius: '12px',
-                    background: 'rgba(16,185,129,0.04)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.75rem'
-                  }}
-                >
+                <div key={session.id} style={{ padding: '1.1rem', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '12px', background: 'rgba(16,185,129,0.04)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {/* Selfie + name */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                     <div style={{ position: 'relative', flexShrink: 0 }}>
                       {session.check_in_photo_url ? (
-                        <img
-                          src={session.check_in_photo_url}
-                          alt={`${session.employee_name} selfie`}
-                          style={{
-                            width: '52px', height: '52px', borderRadius: '50%',
-                            objectFit: 'cover',
-                            border: '2px solid rgba(16,185,129,0.5)'
-                          }}
-                        />
+                        <img src={session.check_in_photo_url} alt={`${session.employee_name} selfie`} style={{ width: '52px', height: '52px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(16,185,129,0.5)' }} />
                       ) : (
-                        <div style={{
-                          width: '52px', height: '52px', borderRadius: '50%',
-                          border: '2px solid rgba(16,185,129,0.25)',
-                          background: 'rgba(16,185,129,0.07)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: '1.2rem', color: 'var(--text-muted)'
-                        }}>
+                        <div style={{ width: '52px', height: '52px', borderRadius: '50%', border: '2px solid rgba(16,185,129,0.25)', background: 'rgba(16,185,129,0.07)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', color: 'var(--text-muted)' }}>
                           {session.employee_name.charAt(0).toUpperCase()}
                         </div>
                       )}
-                      {/* Pulsing online dot */}
-                      <span style={{
-                        position: 'absolute', bottom: '2px', right: '2px',
-                        width: '10px', height: '10px', borderRadius: '50%',
-                        backgroundColor: 'var(--primary)',
-                        border: '2px solid var(--bg-darker)',
-                        boxShadow: '0 0 0 2px rgba(16,185,129,0.3)',
-                        animation: 'pulse 2s infinite'
-                      }} />
+                      <span style={{ position: 'absolute', bottom: '2px', right: '2px', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: 'var(--primary)', border: '2px solid var(--bg-darker)', boxShadow: '0 0 0 2px rgba(16,185,129,0.3)', animation: 'pulse 2s infinite' }} />
                     </div>
                     <div>
                       <div style={{ fontWeight: '700', color: '#fff', fontSize: '0.95rem' }}>{session.employee_name}</div>
@@ -972,29 +968,22 @@ export default function AdminPanel({ user, profile }) {
                     <MapPin size={14} style={{ color: 'var(--primary)', flexShrink: 0, marginTop: '2px' }} />
                     <div>
                       <div style={{ fontWeight: '600', color: '#fff', fontSize: '0.85rem' }}>{session.client_name}</div>
-                      {session.client_address && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{session.client_address}</div>
-                      )}
+                      {session.client_address && <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{session.client_address}</div>}
                     </div>
                   </div>
 
-                  {/* Check-in time + elapsed */}
+                  {/* Time + elapsed */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
                       <Clock size={13} />
                       <span>In since {formatTime(session.check_in_time)}</span>
                     </div>
-                    <span style={{
-                      fontSize: '0.75rem', fontWeight: '700',
-                      background: 'rgba(16,185,129,0.12)', color: 'var(--primary)',
-                      padding: '0.15rem 0.55rem', borderRadius: '999px',
-                      border: '1px solid rgba(16,185,129,0.2)'
-                    }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: '700', background: 'rgba(16,185,129,0.12)', color: 'var(--primary)', padding: '0.15rem 0.55rem', borderRadius: '999px', border: '1px solid rgba(16,185,129,0.2)' }}>
                       {getElapsed(session.check_in_time)}
                     </span>
                   </div>
 
-                  {/* GPS coordinates */}
+                  {/* GPS */}
                   {session.check_in_latitude && session.check_in_longitude && (
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace', borderTop: '1px solid var(--card-border)', paddingTop: '0.6rem' }}>
                       📍 {session.check_in_latitude.toFixed(5)}, {session.check_in_longitude.toFixed(5)}
